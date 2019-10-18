@@ -11,6 +11,6 @@ actions:
   - mainAction:
       log: mainTest
 
-OnInstall:
+onInstall:
   - haMix1Action
   - jahiaMix1Action
