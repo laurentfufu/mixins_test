@@ -1,0 +1,14 @@
+---
+type: install
+name: Mixins tests
+baseUrl: https://github.com/laurentfufu/mixins_test/raw/master
+
+mixins:
+  - haproxy/mix1.yml
+  - jahia/mix1.yml
+
+actions:
+  - mainAction:
+      log: mainTest
+  - haMix1Action
+  - jahiaMix1Action
