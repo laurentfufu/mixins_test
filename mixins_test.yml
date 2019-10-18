@@ -10,5 +10,7 @@ mixins:
 actions:
   - mainAction:
       log: mainTest
+
+OnInstall:
   - haMix1Action
   - jahiaMix1Action
