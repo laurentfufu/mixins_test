@@ -23,6 +23,9 @@ actions:
     - jahia_copyApp: proc, cp
     - if (settings.mode == 'development'):
         - jahia_installMaven: proc, cp
+    - else:
+        - jahia_setupDatadogAgent: cp, proc
+
     - if (settings.skipStart != 'true'):
         - api: env.control.ExecDockerRunCmd
           nodeId: ${nodes.proc.first.id}
@@ -32,7 +35,6 @@ actions:
 
     - if (settings.skipStart != 'true'): env.control.ExecDockerRunCmd [${nodes.cp.join(id,)}]
 
-    - setupDatadogAgent: cp, proc
 
 
   jahia_createDatabase:
@@ -116,4 +118,70 @@ actions:
           systemctl restart crond
           systemctl enable datadog-agent
         user: root
+
+  jahia_addNodeToHaproxy:
+    - script: |-
+        var resp = jelastic.env.control.ExecCmdByGroup('${env.shortdomain}-ha', session, "bl", toJSON([
+          { "command": 'echo \"server ${env.appid}-${this.nodeId} ${this.nodeIp}:80 check cookie s${this.nodeId}\" >> /etc/haproxy/haproxy.cfg.d/10-jahia.cfg && \
+          sudo service haproxy reload' }
+        ]), false, false);
+        return resp;
+
+  jahia_removeNodeFromHaproxy:
+    - script: |-
+        var resp = jelastic.env.control.ExecCmdByGroup('${env.shortdomain}-ha', session, "bl", toJSON([
+          { "command": 'grep -q "${env.appid}-${this.nodeId}" /etc/haproxy/haproxy.cfg.d/10-jahia.cfg && \
+          sed -i \"/${env.appid}-${this.nodeId}/d\" /etc/haproxy/haproxy.cfg.d/10-jahia.cfg && \
+          sudo service haproxy reload' }
+        ]), false, false);
+        return resp;
+
+
+  jahia_onAfterRedeployContainer_cp:
+    - jahia_copyApp: cp
+    - if (settings.mode == 'development'):
+        - jahia_installMaven: cp
+    - else:
+        - jahia_setupDatadogAgent: cp
+    - cmd[cp]:
+        - sed -i "s#\(processingServer\s*=\).*#\1 false#g" $STACK_PATH/conf/digital-factory-config/jahia/jahia.node.properties
+        - chkconfig --add tomcat
+        - chkconfig --level 3 tomcat on
+        - service tomcat start
+
+  jahia_onAfterRedeployContainer_proc:
+    - jahia_copyApp: proc
+    - if (settings.mode == 'development'):
+        - jahia_installMaven: proc
+    - else:
+        - jahia_setupDatadogAgent: proc
+    - cmd[proc]:
+        - chkconfig --add tomcat
+        - chkconfig --level 3 tomcat on
+        - service tomcat start
+
+  jahia_onAfterServiceScaleOut_cp:
+    forEach(event.response.nodes):
+      - jahia_copyApp: ${@i.id}
+      - if (settings.mode == 'development'):
+          - jahia_installMaven: ${@i.id}
+      - else:
+          - jahia_setupDatadogAgent: ${@i.id}
+      - cmd[${@i.id}]: |-
+          if (service tomcat status); then
+            echo "Now Restarting Tomcat"
+            service tomcat restart
+          else
+            echo "Now Launching Tomcat"
+            service tomcat start
+          fi
+      - jahia_addNodeToHaproxy:
+          nodeId: ${@i.id}
+          nodeIp: ${@i.intIP}
+
+  jahia_onBeforeScaleIn_cp:
+    forEach(event.response.nodes):
+      - jahia_removeNodeFromHaproxy:
+          nodeId: ${@i.id}
+          nodeIp: ${@i.intIP}
 

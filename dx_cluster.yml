@@ -194,52 +194,19 @@ nodes: definedInOnBeforeInstall
 #   - cmd [${targetNodes.nodeGroup}]:
 #       - sed -i -e 's/.*NOPASSWD.*//g' /etc/sudoers.d/sudo
 #     user: root
-# 
-# onBeforeScaleIn[cp]:
-#   forEach(event.response.nodes):
-#     - removeNodeFromHaproxy:
-#         nodeId: ${@i.id}
-#         nodeIp: ${@i.intIP}
-# 
-# onAfterServiceScaleOut[cp]:
-#   forEach(event.response.nodes):
-#     - copyApp: ${@i.id}
-#     - if (settings.mode == 'development'):
-#         - installMaven: ${@i.id}
-#     - setupDatadogAgentPerNode: ${@i.id}
-#     - cmd[${@i.id}]: |-
-#         if (service tomcat status); then
-#           echo "Now Restarting Tomcat"
-#           service tomcat restart
-#         else
-#           echo "Now Launching Tomcat"
-#           service tomcat start
-#         fi
-#     - addNodeToHaproxy:
-#         nodeId: ${@i.id}
-#         nodeIp: ${@i.intIP}
-# 
-# onAfterRedeployContainer[cp]:
-#   - copyApp: cp
-#   - if (settings.mode == 'development'):
-#       - installMaven: cp
-#   - cmd[cp]:
-#       - sed -i "s#\(processingServer\s*=\).*#\1 false#g" $STACK_PATH/conf/digital-factory-config/jahia/jahia.node.properties
-#       - chkconfig --add tomcat
-#       - chkconfig --level 3 tomcat on
-#       - service tomcat start
-#   - setupDatadogAgent: cp
-# 
-# onAfterRedeployContainer[proc]:
-#   - copyApp: proc
-#   - if (settings.mode == 'development'):
-#       - installMaven: proc
-#   - cmd[proc]:
-#       - chkconfig --add tomcat
-#       - chkconfig --level 3 tomcat on
-#       - service tomcat start
-#   - setupDatadogAgent: proc
-# 
+
+onBeforeScaleIn[cp]:
+  - jahia_onBeforeScaleIn_cp
+
+onAfterServiceScaleOut[cp]:
+  - jahia_onAfterServiceScaleOut_cp
+
+onAfterRedeployContainer[cp]:
+  - jahia_onAfterRedeployContainer_cp
+
+onAfterRedeployContainer[proc]:
+  - jahia_onAfterRedeployContainer_proc
+
 # onBeforeDelete:
 #   - api: environment.control.DeleteEnv
 #     params:
