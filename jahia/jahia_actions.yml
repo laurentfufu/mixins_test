@@ -1,0 +1,142 @@
+---
+globals:
+  xms: 256M
+  xmx: 3584M
+  java_opts:
+    -DDB_USER=${DB_USER}
+    -DDB_PASSWORD=${DB_PASSWORD}
+    -DREDIS_PASSWORD=${REDIS_PASSWORD}
+    -DMANAGER_USER=${MANAGER_USER}
+    -DMANAGER_PASSWORD=${MANAGER_PASSWORD}
+    -DSUPER_USER_PASSWORD=${SUPER_USER_PASSWORD}
+    -DHOST_NAME=$(hostname)
+    -Dcom.sun.management.jmxremote
+    -Dcom.sun.management.jmxremote.port=7199
+    -Dcom.sun.management.jmxremote.ssl=false
+    -Dcom.sun.management.jmxremote.authenticate=false
+    -XX:MaxPermSize=512m
+    -XX:+HeapDumpOnOutOfMemoryError
+    -XX:+PrintConcurrentLocks
+    -XX:+UseParallelGC
+    -XX:SurvivorRatio=8
+    -Xmn1G
+
+
+actions:
+  jahia_install:
+    - log: "## Beginning installation of Jahia's nodes"
+    - if (/\/raw\/v[0-9]+(\.[0-9]+)+$/.test(baseUrl)):
+        - log: "## git repo branch is prod"
+        - api [*]: env.control.AddContainerEnvVars
+          vars: {"PACKAGE_TYPE": "prod"}
+    - if ( '${globals.is_proxysql}' == 'true' ):
+        - log: "## is_proxysql is true"
+        - api [*]: env.control.AddContainerEnvVars
+          vars: {"DB_ENDPOINT": "proxy"}
+
+    - environment.control.ApplyNodeGroupData [proc, cp]:
+        data:
+          productName: dx
+          productVersion: ${globals.dx_version}
+          packageType: ${globals.package_type}
+
+    - if (settings.skipStart != 'true'): jahia_createDatabase
+    # - if (settings.mode == 'production'): createDataDogUser
+
+    - jahia_copyApp: proc, cp
+    - if (settings.mode == 'development'):
+        - jahia_installMaven: proc, cp
+    - if (settings.skipStart != 'true'):
+        - api: env.control.ExecDockerRunCmd
+          nodeId: ${nodes.proc.first.id}
+
+    - sleep:
+        - milliseconds: 120000
+
+    - if (settings.skipStart != 'true'): env.control.ExecDockerRunCmd [${nodes.cp.join(id,)}]
+
+    - setupDatadogAgent: cp, proc
+
+
+  jahia_createDatabase:
+    - log: "## Create Jahia's database and user"
+    - cmd[${nodes.sqldb.master.id}]: |-
+        mysql -e "CREATE DATABASE IF NOT EXISTS jahia CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+        mysql -e "grant all privileges on jahia.* to '${globals.db_user}'@'%' identified by '${globals.db_pass}';"
+        mysql -e "flush privileges;"
+      user: root
+    - log: "## Import DX schema in database"
+    - if ( '${globals.is_proxysql}' == 'true' ):
+        - cmd[${nodes.proc.first.id}]: cat $DATA_PATH/digital-factory-data/db/sql/schema/mysql/01-create*.sql | mysql -h proxysql_1 -u$DB_USER -p$DB_PASSWORD -f jahia
+    - else:
+        - cmd[${nodes.proc.first.id}]: cat $DATA_PATH/digital-factory-data/db/sql/schema/mysql/01-create*.sql | mysql -h mysqldb -u$DB_USER -p$DB_PASSWORD -f jahia
+
+  jahia_installMaven:
+    - log: "## Activate Maven on ${this}"
+    - cmd[${this}]: |-
+        mvn_path=$(find /opt/*maven*/bin -type f -name "mvn")
+        sed -i 's,#\(mvnPath =\s*\).*$,\1'$mvn_path',' /opt/tomcat/conf/digital-factory-config/jahia/jahia.properties
+
+  jahia_copyApp:
+    - log: "## Determine JDK version for good _JAVA_OPTIONS envvar"
+    - cmd[${this}]: |-
+        case "$(ls /usr/java/latest -l | awk '{print $NF}' | awk -F'/' '{print $NF}')" in
+          jdk1.8*)
+              j_opts='${globals.java_opts}'
+              ;;
+          *)
+              j_opts='${globals.java_opts} -Xlog:gc::time,uptime,level,pid,tid,tags'
+              ;;
+        esac
+        sed -e '2isource /.jelenv' -e "s/\(^JAVA_OPTS=.*\)\(\"$\)/\1 ${j_opts}\2/" -i /opt/tomcat/conf/tomcat-env.sh
+
+    - log: "## Copying jahia and settings is properties"
+    - cmd[${this}]: |-
+        [ "${this}" == "cp" ] && sed -i "s#\(processingServer\s*=\).*#\1 false#g" $STACK_PATH/conf/digital-factory-config/jahia/jahia.node.properties
+        rm -rf $STACK_PATH/webapps/*
+        cp -rf $DATA_PATH/jahia/tomcat/webapps/* $STACK_PATH/webapps
+        chown -R tomcat:tomcat $STACK_PATH/webapps
+        cd /opt/tomcat/webapps/ROOT/WEB-INF/lib/
+        mngr_pwd=$(/usr/java/latest/bin/jjs -cp $(find . -name jahia-commons-*.jar):$(find . -name jasypt-*.jar) -scripting <<< "print(org.jahia.commons.encryption.EncryptionUtils.pbkdf2Digest(\$ENV.MANAGER_PASSWORD, \"p\"))" | egrep '^(p|s2):[[:graph:]]+=$')
+        sed -i "s|^jahiaToolManagerPassword .*$|jahiaToolManagerPassword = $mngr_pwd|" $STACK_PATH/conf/digital-factory-config/jahia/jahia.properties
+        sed -i "s/operatingMode/#operatingMode/" $STACK_PATH/conf/digital-factory-config/jahia/jahia.properties
+        sed -i "s#\${HOST_NAME}#$HOSTNAME#g" $STACK_PATH/conf/digital-factory-config/jahia/jahia.node.properties
+        echo $SUPER_USER_PASSWORD > $DATA_PATH/digital-factory-data/root.pwd
+        chown -R tomcat:tomcat $DATA_PATH/digital-factory-data/root.pwd
+        sed -i "2i JMX_OPTS=\-XX:+UseParallelGC" /opt/tomcat/conf/tomcat-env.sh
+        sed -i 's/\(^default.config.sync = \)cluster/\1disabled/' /data/digital-factory-data/karaf/etc/org.apache.karaf.cellar.groups.cfg
+        sed -i '/<!-- Access log processes all example./i \\t<!-- Remote IP Valve -->\n \t<Valve className="org.apache.catalina.valves.RemoteIpValve" />\n' /opt/tomcat/conf/server.xml
+        sed -i 's/pattern="%h /pattern="%{org.apache.catalina.AccessLog.RemoteAddr}r /' /opt/tomcat/conf/server.xml
+        rm -rf /data/jahia
+    - if (settings.license):
+        - cmd[${this}]: |-
+            echo "${settings.license}" | base64 -d > /opt/tomcat/conf/digital-factory-config/jahia/license.xml
+    - if ( settings.dbscheme == 'galera'):
+        - log: "## Now settings context.xml for directly use the 3 MariaDB Galera server (no proxysql)"
+        - cmd[${this}]: |-
+            sed 's;\(url="jdbc:mariadb:\)[^"]\+\(/jahia[^"]\+\);\1failover://mysqldb_1,mysqldb_2,mysqldb_3\2;' -i /opt/tomcat/webapps/ROOT/META-INF/context.xml
+    - if ( settings.dbscheme == 'master' && '${globals.is_proxysql}' == 'false'):
+        - log: "## configure mysqldb_1 as master and mysqldb_2 as failover. others are in read only."
+        - cmd[${this}]: |-
+            sed 's;\(url="jdbc:mariadb:\)[^"]\+\(/jahia[^"]\+\);\1failover://mysqldb_1,mysqldb_2\2;' -i /opt/tomcat/webapps/ROOT/META-INF/context.xml
+    - if ( '${globals.is_proxysql}' == 'true' ):
+        - log: "## Configure jdbc to target ProxySQL instead of mariadb and disable usePipelineAuth option from mariadb connector"
+        - cmd[${this}]: |-
+            sed 's;\(url="jdbc:mariadb:\)[^"]\+\(/jahia[^"]\+\);\1failover://proxysql_1,proxysql_2\2\&amp\;usePipelineAuth=false;' -i /opt/tomcat/webapps/ROOT/META-INF/context.xml
+        - log: "## set jdbc timeBetweenEvictionRunsMillis to 5000 (default jdbc value)"
+        - cmd[${this}]: |-
+            sed 's;\(timeBetweenEvictionRunsMillis="\)[0-9]*;\15000;' -i /opt/tomcat/webapps/ROOT/META-INF/context.xml
+
+  jahia_setupDatadogAgent:
+    - log: "## Finalize Datadog agent setup on ${this}"
+    - if (settings.mode == 'production'):
+        cmd [${this}]: |-
+          NODE_NAME=${HOSTNAME/-*}
+          echo "hostname: ${_ROLE}.${NODE_NAME#node}" >> /etc/datadog-agent/datadog.yaml
+          sed 's/service: jahia/service: ${env.shortdomain}/' -i /etc/datadog-agent/conf.d/tomcat.d/conf.yaml
+          chmod 644 /opt/tomcat/logs/catalina.out
+          /usr/local/bin/set_dd_tags.sh
+          systemctl restart crond
+          systemctl enable datadog-agent
+        user: root
+
