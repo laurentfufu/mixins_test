@@ -69,19 +69,19 @@ globals:
 #     user: root
 
 onBeforeScaleIn[cp]:
-  - log: "## UPDATE onBeforeScaleIn for cp"
+  - log: "## This is onBeforeScaleIn for cp"
   - jahia_onBeforeScaleIn_cp
 
 onAfterServiceScaleOut[cp]:
-  - log: "## UPDATE onAfterServiceScaleOut for cp"
+  - log: "## This is onAfterServiceScaleOut for cp"
   - jahia_onAfterServiceScaleOut_cp
 
 onAfterRedeployContainer[cp]:
-  - log: "## UPDATE onAfterRedeployContainer for cp"
+  - log: "## This is onAfterRedeployContainer for cp"
   - jahia_onAfterRedeployContainer_cp
 
 onAfterRedeployContainer[proc]:
-  - log: "## UPDATE onAfterRedeployContainer for proc"
+  - log: "## This is onAfterRedeployContainer for proc"
   - jahia_onAfterRedeployContainer_proc
 
 # onBeforeDelete:
