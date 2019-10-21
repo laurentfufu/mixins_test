@@ -8,9 +8,18 @@ mixins:
   - jahia/mix1.yml
 
 actions:
-  - mainAction:
-      log: mainTest
+  mainAction:
+    log: mainTest
 
 onInstall:
+  - mainAction
   - haMix1Action
   - jahiaMix1Action
+  - ${settings.hop}mix1Action
+
+settings:
+  fields:
+    - name: hop
+      type: string
+      caption: hop
+      required: true

@@ -38,6 +38,28 @@ globals:
   shortdomain: ${settings.shortdomain}
   su_pass: ${settings.rootpwd}
   url_package: ${baseUrl}
+  xms: 256M
+  xmx: 3584M
+  java_opts:
+    -DDB_USER=${DB_USER}
+    -DDB_PASSWORD=${DB_PASSWORD}
+    -DREDIS_PASSWORD=${REDIS_PASSWORD}
+    -DMANAGER_USER=${MANAGER_USER}
+    -DMANAGER_PASSWORD=${MANAGER_PASSWORD}
+    -DSUPER_USER_PASSWORD=${SUPER_USER_PASSWORD}
+    -DHOST_NAME=$(hostname)
+    -Dcom.sun.management.jmxremote
+    -Dcom.sun.management.jmxremote.port=7199
+    -Dcom.sun.management.jmxremote.ssl=false
+    -Dcom.sun.management.jmxremote.authenticate=false
+    -XX:MaxPermSize=512m
+    -XX:+HeapDumpOnOutOfMemoryError
+    -XX:+PrintConcurrentLocks
+    -XX:+UseParallelGC
+    -XX:SurvivorRatio=8
+    -Xmn1G
+
+
 
 
 onBeforeInstall: |
@@ -64,7 +86,6 @@ onBeforeInstall: |
         "MANAGER_USER": "${globals.mngr_user}",
         "MANAGER_PASSWORD": "${globals.mngr_pass}",
         "SUPER_USER_PASSWORD": "${globals.su_pass}",
-        "REDIS_PASSWORD": "${globals.redis_pass}",
         "XMS": "${globals.xms}",
         "XMX": xmx,
         "DATADOGAPIKEY": "${globals.datadog_key}",
@@ -93,7 +114,6 @@ onBeforeInstall: |
         "MANAGER_USER": "${globals.mngr_user}",
         "MANAGER_PASSWORD": "${globals.mngr_pass}",
         "SUPER_USER_PASSWORD": "${globals.su_pass}",
-        "REDIS_PASSWORD": "${globals.redis_pass}",
         "XMS": "${globals.xms}",
         "XMX": "${globals.xmx}",
         "DATADOGAPIKEY": "${globals.datadog_key}",
@@ -170,64 +190,65 @@ nodes: definedInOnBeforeInstall
 # --Events--
 
 
-onUninstall:
-  - cmd [${targetNodes.nodeGroup}]:
-      - sed -i -e 's/.*NOPASSWD.*//g' /etc/sudoers.d/sudo
-    user: root
-
-onBeforeScaleIn[cp]:
-  forEach(event.response.nodes):
-    - removeNodeFromHaproxy:
-        nodeId: ${@i.id}
-        nodeIp: ${@i.intIP}
-
-onAfterServiceScaleOut[cp]:
-  forEach(event.response.nodes):
-    - copyApp: ${@i.id}
-    - if (settings.mode == 'development'):
-        - installMaven: ${@i.id}
-    - setupDatadogAgentPerNode: ${@i.id}
-    - cmd[${@i.id}]: |-
-        if (service tomcat status); then
-          echo "Now Restarting Tomcat"
-          service tomcat restart
-        else
-          echo "Now Launching Tomcat"
-          service tomcat start
-        fi
-    - addNodeToHaproxy:
-        nodeId: ${@i.id}
-        nodeIp: ${@i.intIP}
-
-onAfterRedeployContainer[cp]:
-  - copyApp: cp
-  - if (settings.mode == 'development'):
-      - installMaven: cp
-  - cmd[cp]:
-      - sed -i "s#\(processingServer\s*=\).*#\1 false#g" $STACK_PATH/conf/digital-factory-config/jahia/jahia.node.properties
-      - chkconfig --add tomcat
-      - chkconfig --level 3 tomcat on
-      - service tomcat start
-  - setupDatadogAgent: cp
-
-onAfterRedeployContainer[proc]:
-  - copyApp: proc
-  - if (settings.mode == 'development'):
-      - installMaven: proc
-  - cmd[proc]:
-      - chkconfig --add tomcat
-      - chkconfig --level 3 tomcat on
-      - service tomcat start
-  - setupDatadogAgent: proc
-
-onBeforeDelete:
-  - api: environment.control.DeleteEnv
-    params:
-      envName: "${env.shortdomain}-ha"
-      password: ${event.params.password}
+# onUninstall:
+#   - cmd [${targetNodes.nodeGroup}]:
+#       - sed -i -e 's/.*NOPASSWD.*//g' /etc/sudoers.d/sudo
+#     user: root
+# 
+# onBeforeScaleIn[cp]:
+#   forEach(event.response.nodes):
+#     - removeNodeFromHaproxy:
+#         nodeId: ${@i.id}
+#         nodeIp: ${@i.intIP}
+# 
+# onAfterServiceScaleOut[cp]:
+#   forEach(event.response.nodes):
+#     - copyApp: ${@i.id}
+#     - if (settings.mode == 'development'):
+#         - installMaven: ${@i.id}
+#     - setupDatadogAgentPerNode: ${@i.id}
+#     - cmd[${@i.id}]: |-
+#         if (service tomcat status); then
+#           echo "Now Restarting Tomcat"
+#           service tomcat restart
+#         else
+#           echo "Now Launching Tomcat"
+#           service tomcat start
+#         fi
+#     - addNodeToHaproxy:
+#         nodeId: ${@i.id}
+#         nodeIp: ${@i.intIP}
+# 
+# onAfterRedeployContainer[cp]:
+#   - copyApp: cp
+#   - if (settings.mode == 'development'):
+#       - installMaven: cp
+#   - cmd[cp]:
+#       - sed -i "s#\(processingServer\s*=\).*#\1 false#g" $STACK_PATH/conf/digital-factory-config/jahia/jahia.node.properties
+#       - chkconfig --add tomcat
+#       - chkconfig --level 3 tomcat on
+#       - service tomcat start
+#   - setupDatadogAgent: cp
+# 
+# onAfterRedeployContainer[proc]:
+#   - copyApp: proc
+#   - if (settings.mode == 'development'):
+#       - installMaven: proc
+#   - cmd[proc]:
+#       - chkconfig --add tomcat
+#       - chkconfig --level 3 tomcat on
+#       - service tomcat start
+#   - setupDatadogAgent: proc
+# 
+# onBeforeDelete:
+#   - api: environment.control.DeleteEnv
+#     params:
+#       envName: "${env.shortdomain}-ha"
+#       password: ${event.params.password}
 
 
 onInstall:
+  - log: "## STARTING MAIN MANIFEST"
   - setGlobals:
       dx_version: ${settings.productVersion}
       url_universal_package: ${globals.url_univ}/${response.universal_version}
