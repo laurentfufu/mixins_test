@@ -67,7 +67,7 @@ onBeforeInstall: |
   var cloudlets = '${globals.operating_mode}' == 'production' ? 64 : 40;
   var xmx = '${globals.operating_mode}' == 'production' ? '6000M' : '${globals.xmx}';
   var dockerImage = "${globals.jahia_docker_image}";
-  var jahia_docker_image = "jahiadev/processing:${globals.dx_version}_TEST";
+  var jahia_docker_image = "jahiadev/processing:${globals.product_version}_TEST";
   if (dockerImage != "undefined") {
     jahia_docker_image = dockerImage;
   }
